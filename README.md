@@ -33,8 +33,6 @@ PicoBlast is a thrilling space shooter designed for the Thumby, a tiny handheld 
 - A button: Shoot
 - B button: [Reserved for future features]
 
-## Contributing
-Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](link-to-issues-page).
 
 ## Acknowledgments
 - Developed using the Thumby API
