@@ -33,17 +33,5 @@ NovaNaut is an intense, retro-style space shooter game developed for the Thumby,
 - Use bombs wisely to clear the screen of enemies.
 - Watch out for the final boss in level 8!
 
-### 🤝 Contributing
-
-Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](link_to_issues_page).
-
-### 📜 License
-
-This project is [MIT](link_to_license_file) licensed.
-
-### 🙏 Acknowledgments
-
-- Thanks to the Thumby community for inspiration and support.
-- Special thanks to [Your Name/Username] for creating this cosmic adventure!
 
 Blast off and enjoy NovaNaut! 🚀✨
