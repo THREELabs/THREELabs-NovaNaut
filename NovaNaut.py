@@ -21,12 +21,37 @@ SHAKE_DURATION = const(10)
 SHAKE_INTENSITY = const(2)
 
 # === BITMAPS ===
-# Mech Warrior player sprite (13x11)
 playerMap = bytearray([
-    0,0,8,28,62,127,127,62,28,8,0,  # Body and head
-    0,8,28,42,127,65,127,42,28,8,0   # Legs and arms
+    # Top row - Sharp nose and wing edges
+    0b00000010,  # Sharp point
+    0b00000110,  # Forward tip
+    0b00001110,  # Front section
+    0b00011110,  # Mid-front
+    0b00111110,  # Middle section
+    0b01111110,  # Main body
+    0b00111110,  # Rear section
+    0b00011110,  # Back edge
+    0b00001110,  # Tail
+    0b00000110,  # Rear tip
+    0b00000010,  # Final point
+    0b00000000,
+    0b00000000,
+    
+    # Bottom row - Wing details and fold lines
+    0b00000000,  # Clean tip
+    0b00000000,  # Forward section
+    0b00100000,  # Left fold line
+    0b01110000,  # Left wing
+    0b11111000,  # Main fold
+    0b01110000,  # Center fold
+    0b00100000,  # Right wing
+    0b00000000,  # Back section
+    0b00000000,  # Tail section
+    0b00000000,  # Clean end
+    0b00000000,
+    0b00000000,
+    0b00000000
 ])
-
 # Enhanced bullet patterns
 bulletMap = bytearray([7,15,7])
 chargeBulletMap = bytearray([15,31,63,31,15])
