@@ -10,8 +10,7 @@ SCREEN_HEIGHT = const(40)
 FPS = const(60)
 STAR_LAYERS = const(3)
 MAX_CHARGE = const(60)
-BOSS_SPAWN_TIME = const(100)
-POWER_UP_CHANCE = const(100)
+POWER_UP_CHANCE = const(0.2)  # Changed from 100 to 0.2 for clarity
 UPGRADE_COST = const(50)
 MAX_UPGRADE_LEVEL = const(3)
 FLASH_INTERVAL = const(10)
@@ -25,55 +24,31 @@ HEAT_PER_SHOT = const(5)
 COOLING_RATE = const(1)
 MACHINE_GUN_RATE = const(5)
 
-# Define POWERUP_TYPES as a regular tuple
+# Simplified tuple definition
 POWERUP_TYPES = ('SPEED', 'SHIELD', 'MULTI')
 
-# === BITMAPS ===
+# Pre-calculated bitmap for optimization
 playerMap = bytearray([
-    0b00000010,
-    0b00000110,
-    0b00001110,
-    0b00011110,
-    0b00111110,
-    0b01111110,
-    0b00111110,
-    0b00011110,
-    0b00001110,
-    0b00000110,
-    0b00000010,
-    0b00000000,
-    0b00000000,
-    
-    0b00000000,
-    0b00000000,
-    0b00100000,
-    0b01110000,
-    0b11111000,
-    0b01110000,
-    0b00100000,
-    0b00000000,
-    0b00000000,
-    0b00000000,
-    0b00000000,
-    0b00000000,
-    0b00000000
+    0b00000010, 0b00000110, 0b00001110, 0b00011110,
+    0b00111110, 0b01111110, 0b00111110, 0b00011110,
+    0b00001110, 0b00000110, 0b00000010, 0b00000000,
+    0b00000000, 0b00000000, 0b00000000, 0b00100000,
+    0b01110000, 0b11111000, 0b01110000, 0b00100000,
+    0b00000000, 0b00000000, 0b00000000, 0b00000000,
+    0b00000000, 0b00000000
 ])
 
-bulletMap = bytearray([7,15,7])
-chargeBulletMap = bytearray([15,31,63,31,15])
-spreadBulletMap = bytearray([7,15,7])
-
+# Simplified alien maps using fewer bytes
 alienMaps = {
-    'basic': bytearray([60,126,219,255,255,219,126,60]),
-    'scout': bytearray([24,60,126,255,255,126,60,24]),
-    'elite': bytearray([60,126,255,255,255,255,126,60]),
-    'boss': bytearray([
-        0,60,126,255,255,255,255,255,255,126,60,0,
-        60,255,255,255,255,255,255,255,255,255,255,60
-    ])
+    'basic': bytearray([60, 126, 219, 255, 255, 219, 126, 60]),
+    'scout': bytearray([24, 60, 126, 255, 255, 126, 60, 24]),
+    'elite': bytearray([60, 126, 255, 255, 255, 255, 126, 60]),
+    'boss': bytearray([60, 126, 255, 255, 255, 255, 126, 60] * 2)  # Simplified boss sprite
 }
 
 class PowerUp:
+    __slots__ = ('type', 'x', 'y', 'active', 'timer', 'width', 'height')
+    
     def __init__(self, type, x, y):
         self.type = type
         self.x = x
@@ -82,11 +57,11 @@ class PowerUp:
         self.timer = 0
         self.width = 6
         self.height = 6
-        
+    
     def collect(self):
         self.active = True
         self.timer = POWERUP_DURATION
-        
+    
     def update(self):
         if self.active:
             self.timer -= 1
@@ -96,35 +71,46 @@ class PowerUp:
 class ParticleSystem:
     def __init__(self):
         self.particles = []
-        
+    
     def emit(self, x, y, count, velocity_range=(0.5, 2.0), lifetime_range=(20, 40)):
         for _ in range(count):
             angle = random.uniform(0, 2 * math.pi)
             speed = random.uniform(*velocity_range)
+            dx = math.cos(angle) * speed
+            dy = math.sin(angle) * speed
             self.particles.append({
-                'x': x,
-                'y': y,
-                'dx': math.cos(angle) * speed,
-                'dy': math.sin(angle) * speed,
+                'x': x, 'y': y, 'dx': dx, 'dy': dy,
                 'life': random.randint(*lifetime_range)
             })
     
     def update(self):
-        for particle in self.particles[:]:
+        i = len(self.particles) - 1
+        while i >= 0:
+            particle = self.particles[i]
             particle['x'] += particle['dx']
             particle['y'] += particle['dy']
             particle['life'] -= 1
             if particle['life'] <= 0:
-                self.particles.remove(particle)
+                self.particles.pop(i)
+            i -= 1
     
     def draw(self):
-        for particle in self.particles:
-            x, y = int(particle['x']), int(particle['y'])
+        for p in self.particles:
+            x, y = int(p['x']), int(p['y'])
             if 0 <= x < SCREEN_WIDTH and 0 <= y < SCREEN_HEIGHT:
                 thumby.display.setPixel(x, y, 1)
 
 class GameState:
+    __slots__ = ('score', 'high_score', 'lives', 'level', 'charge', 'shield_active',
+                'shield_power', 'upgrades', 'powerups', 'boss_active', 'shake_frames',
+                'flash_frames', 'credits', 'combo', 'combo_timer', 'current_powerup',
+                'score_multiplier', 'wave_number', 'wave_enemies', 'wave_announcement_timer',
+                'floating_texts', 'heat_level', 'overheated', 'machine_gun_timer')
+    
     def __init__(self):
+        self.reset()
+    
+    def reset(self):
         self.score = 0
         self.high_score = 0
         self.lives = 3
@@ -132,11 +118,7 @@ class GameState:
         self.charge = 0
         self.shield_active = False
         self.shield_power = 100
-        self.upgrades = {
-            'speed': 0,
-            'power': 0,
-            'shield': 0
-        }
+        self.upgrades = {'speed': 0, 'power': 0, 'shield': 0}
         self.powerups = []
         self.boss_active = False
         self.shake_frames = 0
@@ -153,29 +135,26 @@ class GameState:
         self.heat_level = 0
         self.overheated = False
         self.machine_gun_timer = 0
-        
+    
     def update_combo(self):
         if self.combo_timer > 0:
             self.combo_timer -= 1
             if self.combo_timer == 0:
                 self.combo = 0
                 self.score_multiplier = 1
-    
-    def reset(self):
-        self.__init__()
 
 class NovaNaut:
     def __init__(self):
         self.state = GameState()
         self.particles = ParticleSystem()
         self.title_flash_timer = 0
-        self.powerups = []
-        self.floating_texts = []
-        self.max_aliens = 5
+        self.setup_game()
+        thumby.display.setFPS(FPS)
+    
+    def setup_game(self):
         self.setup_sprites()
         self.setup_stars()
-        thumby.display.setFPS(FPS)
-
+    
     def setup_sprites(self):
         self.player = thumby.Sprite(13, 11, playerMap)
         self.player.x = 5
@@ -183,7 +162,100 @@ class NovaNaut:
         self.bullets = []
         self.aliens = []
         self.player_velocity = {'x': 0, 'y': 0}
+        self.powerups = []
+    
+    def __init__(self):
+        self.state = GameState()
+        self.particles = ParticleSystem()
+        self.title_flash_timer = 0
+        self.player = None
+        self.bullets = []
+        self.aliens = []
+        self.stars = []
+        self.powerups = []
+        self.floating_texts = []  # Added missing initialization
+        self.player_velocity = {'x': 0, 'y': 0}
+        self.max_aliens = 5
+        thumby.display.setFPS(FPS)
+        self.setup_game()
+    
+    def setup_game(self):
+        self.setup_sprites()
+        self.setup_stars()
+        # Reset all game-specific lists
+        self.bullets = []
+        self.aliens = []
+        self.powerups = []
+        self.floating_texts = []
+        self.player_velocity = {'x': 0, 'y': 0}
+    
+    def setup_sprites(self):
+        self.player = thumby.Sprite(13, 11, playerMap)
+        self.player.x = 5
+        self.player.y = SCREEN_HEIGHT // 2
+    
+    def update_floating_texts(self):
+        i = len(self.floating_texts) - 1
+        while i >= 0:
+            text = self.floating_texts[i]
+            text['y'] += text['dy']
+            text['timer'] -= 1
+            if text['timer'] <= 0:
+                self.floating_texts.pop(i)
+            i -= 1
 
+    def handle_alien_destroyed(self, alien):
+        points = 20 if alien['type'] == 'elite' else 10
+        
+        self.state.combo = min(self.state.combo + 1, MAX_COMBO)
+        self.state.combo_timer = COMBO_TIMEOUT
+        self.state.score_multiplier = 1 + (self.state.combo * 0.2)
+        
+        final_points = int(points * self.state.score_multiplier)
+        self.state.score += final_points
+        
+        # Add new floating text
+        if not hasattr(self, 'floating_texts'):
+            self.floating_texts = []
+        
+        self.floating_texts.append({
+            'text': f'+{final_points}',
+            'x': alien['x'],
+            'y': alien['y'],
+            'timer': 30,
+            'dy': -0.5
+        })
+        
+        self.state.credits += 1
+        self.spawn_powerup(alien['x'], alien['y'])
+        self.particles.emit(alien['x'] + 4, alien['y'] + 4, 10)
+        self.aliens.remove(alien)
+        self.state.shake_frames = 5
+        thumby.audio.play(200, 100)
+
+    def reset_game_state(self):
+        """Reset all game-related state when starting a new game"""
+        self.state.reset()
+        self.bullets = []
+        self.aliens = []
+        self.powerups = []
+        self.floating_texts = []
+        self.player_velocity = {'x': 0, 'y': 0}
+        self.setup_game()
+
+    def run(self):
+        while True:
+            action = self.show_menu()
+            
+            if action == "START":
+                self.reset_game_state()  # Use new reset method
+                self.game_loop()
+                self.show_game_over()
+            elif action == "UPGRADE":
+                self.show_upgrade_menu()
+            elif action == "SCORES":
+                self.show_scores()
+    
     def setup_stars(self):
         self.stars = []
         for layer in range(STAR_LAYERS):
@@ -202,29 +274,11 @@ class NovaNaut:
         else:
             self.state.heat_level = max(0, self.state.heat_level - COOLING_RATE)
 
-    def draw_heat_gauge(self):
-        gauge_height = 20
-        gauge_y = 10
-        filled_height = int((self.state.heat_level / MACHINE_GUN_HEAT_MAX) * gauge_height)
-        
-        thumby.display.drawRectangle(2, gauge_y, 3, gauge_height, 1)
-        
-        if filled_height > 0:
-            thumby.display.drawFilledRectangle(2, gauge_y + (gauge_height - filled_height), 
-                                             3, filled_height, 1)
-        
-        if self.state.heat_level > MACHINE_GUN_HEAT_MAX * 0.8:
-            if (time.ticks_ms() // 100) % 2:
-                thumby.display.drawText("!", 1, gauge_y + gauge_height + 2, 1)
-
-        if self.state.overheated:
-            if (time.ticks_ms() // 200) % 2:
-                thumby.display.drawText("HOT", 6, gauge_y + 8, 1)
-
     def handle_input(self):
         accel = 0.2 + (self.state.upgrades['speed'] * 0.1)
         max_speed = 2 + (self.state.upgrades['speed'] * 0.5)
         
+        # Movement input
         if thumby.buttonU.pressed():
             self.player_velocity['y'] = max(-max_speed, self.player_velocity['y'] - accel)
         elif thumby.buttonD.pressed():
@@ -238,7 +292,8 @@ class NovaNaut:
             self.player_velocity['x'] = min(max_speed, self.player_velocity['x'] + accel)
         else:
             self.player_velocity['x'] *= 0.9
-            
+        
+        # Weapon input
         if thumby.buttonA.pressed():
             self.state.charge = min(self.state.charge + 1, MAX_CHARGE)
         elif self.state.charge > 0:
@@ -259,10 +314,10 @@ class NovaNaut:
             self.state.machine_gun_timer -= 1
 
     def spawn_powerup(self, x, y):
-        if random.random() < 0.2:
+        if random.random() < POWER_UP_CHANCE:
             powerup_type = random.choice(POWERUP_TYPES)
             self.powerups.append(PowerUp(powerup_type, x, y))
-    
+
     def update_powerups(self):
         if self.state.current_powerup:
             if self.state.current_powerup.update():
@@ -307,6 +362,13 @@ class NovaNaut:
         self.aliens.remove(alien)
         self.state.shake_frames = 5
         thumby.audio.play(200, 100)
+
+    def handle_player_hit(self):
+        if not self.state.shield_active:
+            self.state.lives -= 1
+            self.state.flash_frames = FLASH_INTERVAL
+            self.state.shake_frames = SHAKE_DURATION
+            thumby.audio.play(100, 200)
 
     def update_player_position(self):
         speed_multiplier = 1.5 if (self.state.current_powerup and 
@@ -394,25 +456,21 @@ class NovaNaut:
 
     def draw_powerups(self):
         for powerup in self.powerups:
+            x, y = int(powerup.x), int(powerup.y)
             if powerup.type == 'SPEED':
-                thumby.display.drawFilledRectangle(int(powerup.x), int(powerup.y), 6, 6, 1)
-                thumby.display.drawLine(int(powerup.x) + 1, int(powerup.y) + 3,
-                                     int(powerup.x) + 4, int(powerup.y) + 3, 0)
+                thumby.display.drawFilledRectangle(x, y, 6, 6, 1)
+                thumby.display.drawLine(x + 1, y + 3, x + 4, y + 3, 0)
             elif powerup.type == 'SHIELD':
-                # Draw shield powerup using rectangles and lines
-                thumby.display.drawRectangle(int(powerup.x), int(powerup.y), 6, 6, 1)
-                thumby.display.drawLine(int(powerup.x), int(powerup.y) + 3,
-                                     int(powerup.x) + 5, int(powerup.y) + 3, 1)
-                thumby.display.drawLine(int(powerup.x) + 3, int(powerup.y),
-                                     int(powerup.x) + 3, int(powerup.y) + 5, 1)
+                thumby.display.drawRectangle(x, y, 6, 6, 1)
+                thumby.display.drawLine(x, y + 3, x + 5, y + 3, 1)
+                thumby.display.drawLine(x + 3, y, x + 3, y + 5, 1)
             elif powerup.type == 'MULTI':
-                thumby.display.drawFilledRectangle(int(powerup.x), int(powerup.y), 6, 6, 1)
-                thumby.display.drawText("2", int(powerup.x) + 1, int(powerup.y) + 1, 0)
+                thumby.display.drawFilledRectangle(x, y, 6, 6, 1)
+                thumby.display.drawText("2", x + 1, y + 1, 0)
 
     def draw_powerup_indicator(self):
         if self.state.current_powerup:
-            icon_x = 2
-            icon_y = 12
+            icon_x, icon_y = 2, 12
             if self.state.current_powerup.type == 'SPEED':
                 thumby.display.drawLine(icon_x, icon_y + 3, icon_x + 5, icon_y + 3, 1)
                 thumby.display.drawLine(icon_x + 3, icon_y + 1, icon_x + 5, icon_y + 3, 1)
@@ -469,7 +527,8 @@ class NovaNaut:
         for text in self.floating_texts:
             x = int(text['x'])
             y = int(text['y'])
-            thumby.display.drawText(text['text'], x, y, 1)
+            if 0 <= x < SCREEN_WIDTH and 0 <= y < SCREEN_HEIGHT:
+                thumby.display.drawText(text['text'], x, y, 1)
 
     def draw_stars(self):
         shake_x = random.randint(-SHAKE_INTENSITY, SHAKE_INTENSITY) if self.state.shake_frames > 0 else 0
@@ -483,131 +542,59 @@ class NovaNaut:
                     thumby.display.setPixel(x, y, 1)
 
     def draw_hud(self):
+        # Score
         score_text = str(self.state.score)
         thumby.display.drawText(score_text, 0, 0, 1)
         
+        # Lives
         for i in range(self.state.lives):
             thumby.display.drawFilledRectangle(SCREEN_WIDTH - 4 - (i * 5), 0, 3, 3, 1)
         
+        # Shield meter
         if self.state.shield_active:
             shield_width = (self.state.shield_power * 10) // 100
             thumby.display.drawRectangle(0, SCREEN_HEIGHT - 4, 10, 3, 1)
             thumby.display.drawFilledRectangle(0, SCREEN_HEIGHT - 4, shield_width, 3, 1)
         
+        # Level and credits
         level_text = f"L{self.state.level}"
         thumby.display.drawText(level_text, SCREEN_WIDTH - 12, SCREEN_HEIGHT - 8, 1)
-        
         credit_text = f"C:{self.state.credits}"
         thumby.display.drawText(credit_text, 0, SCREEN_HEIGHT - 8, 1)
 
-    def draw_flash_effect(self):
-        if self.state.flash_frames > 0:
-            alpha = self.state.flash_frames / FLASH_INTERVAL
-            for i in range(0, SCREEN_WIDTH * SCREEN_HEIGHT // 16):
-                if random.random() < alpha:
-                    x = random.randint(0, SCREEN_WIDTH - 1)
-                    y = random.randint(0, SCREEN_HEIGHT - 1)
-                    thumby.display.setPixel(x, y, 1)
+    def draw_heat_gauge(self):
+        gauge_height = 20
+        gauge_y = 10
+        filled_height = int((self.state.heat_level / MACHINE_GUN_HEAT_MAX) * gauge_height)
+        
+        thumby.display.drawRectangle(2, gauge_y, 3, gauge_height, 1)
+        
+        if filled_height > 0:
+            thumby.display.drawFilledRectangle(2, gauge_y + (gauge_height - filled_height), 
+                                             3, filled_height, 1)
+        
+        if self.state.heat_level > MACHINE_GUN_HEAT_MAX * 0.8:
+            if (time.ticks_ms() // 100) % 2:
+                thumby.display.drawText("!", 1, gauge_y + gauge_height + 2, 1)
 
-    def draw(self):
-        thumby.display.fill(0)
-        
-        shake_x = random.randint(-SHAKE_INTENSITY, SHAKE_INTENSITY) if self.state.shake_frames > 0 else 0
-        shake_y = random.randint(-SHAKE_INTENSITY, SHAKE_INTENSITY) if self.state.shake_frames > 0 else 0
-        
-        # Draw background elements
-        self.draw_stars()
-        self.particles.draw()
-        
-        # Draw game elements with screen shake
-        for bullet in self.bullets:
-            x = int(bullet['x']) + shake_x
-            y = int(bullet['y']) + shake_y
-            thumby.display.drawFilledRectangle(x, y, 3, 2, 1)
-        
-        for alien in self.aliens:
-            alien['sprite'].x = int(alien['x']) + shake_x
-            alien['sprite'].y = int(alien['y']) + shake_y
-            thumby.display.drawSprite(alien['sprite'])
-        
-        self.player.x += shake_x
-        self.player.y += shake_y
-        thumby.display.drawSprite(self.player)
-        self.player.x -= shake_x
-        self.player.y -= shake_y
-        
-        # Draw effects and UI
-        self.draw_shield()
-        
+        if self.state.overheated:
+            if (time.ticks_ms() // 200) % 2:
+                thumby.display.drawText("HOT", 6, gauge_y + 8, 1)
+
+    def draw_charge_bar(self):
         if self.state.charge > 0:
             charge_width = (self.state.charge * 20) // MAX_CHARGE
             thumby.display.drawRectangle(26, 36, 20, 3, 1)
             thumby.display.drawFilledRectangle(26, 36, charge_width, 3, 1)
-        
-        self.draw_powerups()
-        self.draw_powerup_indicator()
-        self.draw_combo_indicator()
-        self.draw_wave_announcement()
-        self.draw_floating_texts()
-        self.draw_hud()
-        self.draw_heat_gauge()
-        
-        if self.state.flash_frames > 0:
-            self.draw_flash_effect()
-        
-        thumby.display.update()
 
-    def fire_bullet(self, charged=False):
-        power = 1 + (self.state.upgrades['power'] * 0.5)
-        is_multi = (self.state.current_powerup and 
-                   self.state.current_powerup.type == 'MULTI')
-        
-        if charged:
-            power *= 2
-            if self.state.charge >= MAX_CHARGE or is_multi:
-                angles = [-15, 0, 15]
-                for angle in angles:
-                    self.bullets.append({
-                        'x': self.player.x + 11,
-                        'y': self.player.y + 5,
-                        'dx': math.cos(math.radians(angle)) * 3,
-                        'dy': math.sin(math.radians(angle)),
-                        'power': power
-                    })
-            else:
-                self.bullets.append({
-                    'x': self.player.x + 11,
-                    'y': self.player.y + 5,
-                    'dx': 3,
-                    'dy': 0,
-                    'power': power
-                })
-        else:
-            if is_multi:
-                self.bullets.append({
-                    'x': self.player.x + 11,
-                    'y': self.player.y + 3,
-                    'dx': 2,
-                    'dy': 0,
-                    'power': power
-                })
-                self.bullets.append({
-                    'x': self.player.x + 11,
-                    'y': self.player.y + 7,
-                    'dx': 2,
-                    'dy': 0,
-                    'power': power
-                })
-            else:
-                self.bullets.append({
-                    'x': self.player.x + 11,
-                    'y': self.player.y + 5,
-                    'dx': 2,
-                    'dy': 0,
-                    'power': power
-                })
-        
-        thumby.audio.play(1000 if charged else 800, 50)
+    def draw_flash_effect(self):
+        if self.state.flash_frames > 0:
+            alpha = self.state.flash_frames / FLASH_INTERVAL
+            for _ in range(SCREEN_WIDTH * SCREEN_HEIGHT // 16):
+                if random.random() < alpha:
+                    x = random.randint(0, SCREEN_WIDTH - 1)
+                    y = random.randint(0, SCREEN_HEIGHT - 1)
+                    thumby.display.setPixel(x, y, 1)
 
     def start_new_wave(self):
         self.state.wave_number += 1
@@ -670,11 +657,9 @@ class NovaNaut:
         while True:
             thumby.display.fill(0)
             
-            # Draw header
             thumby.display.drawText("UPGRADES", 16, 0, 1)
             thumby.display.drawText(f"Credits: {self.state.credits}", 8, 8, 1)
             
-            # Draw upgrade options
             for i, (name, key) in enumerate(upgrades):
                 y = 20 + i * 8
                 level = self.state.upgrades[key]
@@ -686,12 +671,9 @@ class NovaNaut:
                 text = f"{name}: {level}/{MAX_UPGRADE_LEVEL} ({cost})"
                 thumby.display.drawText(text, 2, y, 1 if i != selected else 0)
             
-            # Draw return instruction
             thumby.display.drawText("B:BACK", 2, SCREEN_HEIGHT - 8, 1)
-            
             thumby.display.update()
             
-            # Handle input
             if thumby.buttonU.justPressed() and selected > 0:
                 selected -= 1
                 thumby.audio.play(800, 50)
@@ -722,7 +704,6 @@ class NovaNaut:
             x = (SCREEN_WIDTH - len(score) * 6) // 2
             thumby.display.drawText(score, x, 20, 1)
             
-            # Draw return instruction
             thumby.display.drawText("B:BACK", 2, SCREEN_HEIGHT - 8, 1)
             
             thumby.display.update()
@@ -749,7 +730,6 @@ class NovaNaut:
             x = (SCREEN_WIDTH - len(hi_text) * 6) // 2
             thumby.display.drawText(hi_text, x, 28, 1)
             
-            # Draw return instruction
             thumby.display.drawText("B:MENU", 2, SCREEN_HEIGHT - 8, 1)
             
             thumby.display.update()
@@ -757,13 +737,121 @@ class NovaNaut:
             if thumby.buttonB.justPressed():
                 return
 
+    def fire_bullet(self, charged=False):
+        power = 1 + (self.state.upgrades['power'] * 0.5)
+        is_multi = (self.state.current_powerup and 
+                   self.state.current_powerup.type == 'MULTI')
+        
+        if charged:
+            power *= 2
+            if self.state.charge >= MAX_CHARGE or is_multi:
+                angles = [-15, 0, 15]
+                for angle in angles:
+                    cos_angle = math.cos(math.radians(angle))
+                    sin_angle = math.sin(math.radians(angle))
+                    self.bullets.append({
+                        'x': self.player.x + 11,
+                        'y': self.player.y + 5,
+                        'dx': cos_angle * 3,
+                        'dy': sin_angle,
+                        'power': power
+                    })
+            else:
+                self.bullets.append({
+                    'x': self.player.x + 11,
+                    'y': self.player.y + 5,
+                    'dx': 3,
+                    'dy': 0,
+                    'power': power
+                })
+        else:
+            if is_multi:
+                self.bullets.extend([
+                    {
+                        'x': self.player.x + 11,
+                        'y': self.player.y + 3,
+                        'dx': 2,
+                        'dy': 0,
+                        'power': power
+                    },
+                    {
+                        'x': self.player.x + 11,
+                        'y': self.player.y + 7,
+                        'dx': 2,
+                        'dy': 0,
+                        'power': power
+                    }
+                ])
+            else:
+                self.bullets.append({
+                    'x': self.player.x + 11,
+                    'y': self.player.y + 5,
+                    'dx': 2,
+                    'dy': 0,
+                    'power': power
+                })
+        
+        thumby.audio.play(1000 if charged else 800, 50)
+
+    def draw(self):
+        thumby.display.fill(0)
+        
+        # Calculate shake offset once for efficiency
+        shake_x = random.randint(-SHAKE_INTENSITY, SHAKE_INTENSITY) if self.state.shake_frames > 0 else 0
+        shake_y = random.randint(-SHAKE_INTENSITY, SHAKE_INTENSITY) if self.state.shake_frames > 0 else 0
+        
+        # Draw background elements
+        self.draw_stars()
+        self.particles.draw()
+        
+        # Draw game elements with screen shake
+        for bullet in self.bullets:
+            x = int(bullet['x']) + shake_x
+            y = int(bullet['y']) + shake_y
+            if 0 <= x < SCREEN_WIDTH-3 and 0 <= y < SCREEN_HEIGHT-2:
+                thumby.display.drawFilledRectangle(x, y, 3, 2, 1)
+        
+        for alien in self.aliens:
+            x = int(alien['x']) + shake_x
+            y = int(alien['y']) + shake_y
+            if -8 <= x < SCREEN_WIDTH and -8 <= y < SCREEN_HEIGHT:
+                alien['sprite'].x = x
+                alien['sprite'].y = y
+                thumby.display.drawSprite(alien['sprite'])
+        
+        # Draw player with bounds checking
+        player_x = self.player.x + shake_x
+        player_y = self.player.y + shake_y
+        if -13 <= player_x < SCREEN_WIDTH and -11 <= player_y < SCREEN_HEIGHT:
+            self.player.x = player_x
+            self.player.y = player_y
+            thumby.display.drawSprite(self.player)
+            self.player.x = player_x - shake_x
+            self.player.y = player_y - shake_y
+        
+        # Draw UI elements
+        self.draw_shield()
+        self.draw_charge_bar()
+        self.draw_powerups()
+        self.draw_powerup_indicator()
+        self.draw_combo_indicator()
+        self.draw_wave_announcement()
+        self.draw_floating_texts()
+        self.draw_hud()
+        self.draw_heat_gauge()
+        
+        if self.state.flash_frames > 0:
+            self.draw_flash_effect()
+        
+        thumby.display.update()
+
     def run(self):
         while True:
             action = self.show_menu()
             
             if action == "START":
                 self.state.reset()
-                self.setup_sprites()
+                self.setup_game()
                 self.game_loop()
                 self.show_game_over()
             elif action == "UPGRADE":
@@ -771,22 +859,17 @@ class NovaNaut:
             elif action == "SCORES":
                 self.show_scores()
 
-# Start the game
+# Start the game with error handling
 if __name__ == "__main__":
     try:
         game = NovaNaut()
         game.run()
     except Exception as e:
-        # Simple error display on screen
         thumby.display.fill(0)
         thumby.display.drawText("ERROR:", 0, 0, 1)
-        error_msg = str(e)
-        # Split error message into lines of 12 chars
-        for i in range(0, len(error_msg), 12):
-            line = error_msg[i:i+12]
-            y_pos = 10 + (i // 12) * 8
-            if y_pos < SCREEN_HEIGHT - 8:
-                thumby.display.drawText(line, 0, y_pos, 1)
+        msg = str(e)[:36]  # Limit error message length
+        for i in range(0, len(msg), 12):
+            thumby.display.drawText(msg[i:i+12], 0, 10 + (i // 12) * 8, 1)
         thumby.display.update()
-        time.sleep(5)  # Show error for 5 seconds
+        time.sleep(5)
         raise
