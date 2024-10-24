@@ -363,4 +363,114 @@ class NovaNaut:
         for alien in self.aliens[:]:
             for bullet in self.bullets[:]:
                 if (abs(alien['x'] - bullet['x']) < 8 and 
-                    abs(alien['y'] - bullet['y
+                    abs(alien['y'] - bullet['y']) < 8):
+                    alien['health'] -= bullet['power']
+                    self.bullets.remove(bullet)
+                    if alien['health'] <= 0:
+                        self.handle_alien_destroyed(alien)
+                        break
+            
+            if (abs(self.player.x + 6 - (alien['x'] + 4)) < 8 and 
+                abs(self.player.y + 5 - (alien['y'] + 4)) < 8):
+                if self.state.shield_active:
+                    self.state.shield_power -= 25
+                    if self.state.shield_power <= 0:
+                        self.state.shield_active = False
+                    self.aliens.remove(alien)
+                else:
+                    self.handle_player_hit()
+                    self.aliens.remove(alien)
+
+    def fire_bullet(self, charged=False):
+        power = 1 + (self.state.upgrades['power'] * 0.5)
+        is_multi = (self.state.current_powerup and 
+                   self.state.current_powerup.type == 'MULTI')
+        
+        if charged:
+            power *= 2
+            if self.state.charge >= MAX_CHARGE or is_multi:
+                angles = [-15, 0, 15]
+                for angle in angles:
+                    self.bullets.append({
+                        'x': self.player.x + 11,
+                        'y': self.player.y + 5,
+                        'dx': math.cos(math.radians(angle)) * 3,
+                        'dy': math.sin(math.radians(angle)),
+                        'power': power
+                    })
+            else:
+                self.bullets.append({
+                    'x': self.player.x + 11,
+                    'y': self.player.y + 5,
+                    'dx': 3,
+                    'dy': 0,
+                    'power': power
+                })
+        else:
+            if is_multi:
+                self.bullets.append({
+                    'x': self.player.x + 11,
+                    'y': self.player.y + 3,
+                    'dx': 2,
+                    'dy': 0,
+                    'power': power
+                })
+                self.bullets.append({
+                    'x': self.player.x + 11,
+                    'y': self.player.y + 7,
+                    'dx': 2,
+                    'dy': 0,
+                    'power': power
+                })
+            else:
+                self.bullets.append({
+                    'x': self.player.x + 11,
+                    'y': self.player.y + 5,
+                    'dx': 2,
+                    'dy': 0,
+                    'power': power
+                })
+        
+        thumby.audio.play(1000 if charged else 800, 50)
+
+    def game_loop(self):
+        self.start_new_wave()  # Initialize first wave
+        while self.state.lives > 0:
+            self.handle_input()
+            self.update()
+            self.check_wave_completion()
+            self.draw()
+
+    def run(self):
+        while True:
+            action = self.show_menu()
+            
+            if action == "START":
+                self.state.reset()
+                self.setup_sprites()
+                self.game_loop()
+                self.show_game_over()
+            elif action == "UPGRADE":
+                self.show_upgrade_menu()
+            elif action == "SCORES":
+                self.show_scores()
+
+# Start the game
+if __name__ == "__main__":
+    try:
+        game = NovaNaut()
+        game.run()
+    except Exception as e:
+        # Simple error display on screen
+        thumby.display.fill(0)
+        thumby.display.drawText("ERROR:", 0, 0, 1)
+        error_msg = str(e)
+        # Split error message into lines of 12 chars
+        for i in range(0, len(error_msg), 12):
+            line = error_msg[i:i+12]
+            y_pos = 10 + (i // 12) * 8
+            if y_pos < SCREEN_HEIGHT - 8:
+                thumby.display.drawText(line, 0, y_pos, 1)
+        thumby.display.update()
+        time.sleep(5)  # Show error for 5 seconds
+        raise
