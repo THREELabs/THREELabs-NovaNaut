@@ -315,6 +315,139 @@ class NovaNaut:
         self.aliens.remove(alien)
         self.state.shake_frames = 5
         thumby.audio.play(200, 100)
+        
+    def show_menu(self):
+        menu_items = ["START", "UPGRADE", "SCORES"]
+        selected = 0
+        
+        while True:
+            thumby.display.fill(0)
+            
+            # Draw title
+            title = "NOVANAUT"
+            title_x = (SCREEN_WIDTH - len(title) * 6) // 2
+            self.title_flash_timer = (self.title_flash_timer + 1) % 30
+            if self.title_flash_timer < 20:
+                thumby.display.drawText(title, title_x, 4, 1)
+            
+            # Draw menu items
+            for i, item in enumerate(menu_items):
+                y = 15 + i * 8
+                x = (SCREEN_WIDTH - len(item) * 6) // 2
+                if i == selected:
+                    thumby.display.drawRectangle(x - 2, y - 1, len(item) * 6 + 3, 9, 1)
+                thumby.display.drawText(item, x, y, 1 if i != selected else 0)
+            
+            thumby.display.update()
+            
+            # Handle input
+            if thumby.buttonU.justPressed() and selected > 0:
+                selected -= 1
+                thumby.audio.play(800, 50)
+            elif thumby.buttonD.justPressed() and selected < len(menu_items) - 1:
+                selected += 1
+                thumby.audio.play(800, 50)
+            elif thumby.buttonA.justPressed():
+                thumby.audio.play(1000, 100)
+                return menu_items[selected]
+
+    def show_upgrade_menu(self):
+        upgrades = [
+            ("SPEED", 'speed'),
+            ("POWER", 'power'),
+            ("SHIELD", 'shield')
+        ]
+        selected = 0
+        
+        while True:
+            thumby.display.fill(0)
+            
+            # Draw header
+            thumby.display.drawText("UPGRADES", 16, 0, 1)
+            thumby.display.drawText(f"Credits: {self.state.credits}", 8, 8, 1)
+            
+            # Draw upgrade options
+            for i, (name, key) in enumerate(upgrades):
+                y = 20 + i * 8
+                level = self.state.upgrades[key]
+                cost = UPGRADE_COST * (level + 1)
+                
+                if i == selected:
+                    thumby.display.drawRectangle(0, y - 1, SCREEN_WIDTH, 9, 1)
+                
+                text = f"{name}: {level}/{MAX_UPGRADE_LEVEL} ({cost})"
+                thumby.display.drawText(text, 2, y, 1 if i != selected else 0)
+            
+            # Draw return instruction
+            thumby.display.drawText("B:BACK", 2, SCREEN_HEIGHT - 8, 1)
+            
+            thumby.display.update()
+            
+            # Handle input
+            if thumby.buttonU.justPressed() and selected > 0:
+                selected -= 1
+                thumby.audio.play(800, 50)
+            elif thumby.buttonD.justPressed() and selected < len(upgrades) - 1:
+                selected += 1
+                thumby.audio.play(800, 50)
+            elif thumby.buttonA.justPressed():
+                key = upgrades[selected][1]
+                level = self.state.upgrades[key]
+                cost = UPGRADE_COST * (level + 1)
+                
+                if level < MAX_UPGRADE_LEVEL and self.state.credits >= cost:
+                    self.state.credits -= cost
+                    self.state.upgrades[key] += 1
+                    thumby.audio.play(1000, 100)
+            elif thumby.buttonB.justPressed():
+                return
+
+    def show_scores(self):
+        while True:
+            thumby.display.fill(0)
+            
+            text = "HIGH SCORE"
+            x = (SCREEN_WIDTH - len(text) * 6) // 2
+            thumby.display.drawText(text, x, 10, 1)
+            
+            score = str(self.state.high_score)
+            x = (SCREEN_WIDTH - len(score) * 6) // 2
+            thumby.display.drawText(score, x, 20, 1)
+            
+            # Draw return instruction
+            thumby.display.drawText("B:BACK", 2, SCREEN_HEIGHT - 8, 1)
+            
+            thumby.display.update()
+            
+            if thumby.buttonB.justPressed():
+                return
+
+    def show_game_over(self):
+        if self.state.score > self.state.high_score:
+            self.state.high_score = self.state.score
+        
+        while True:
+            thumby.display.fill(0)
+            
+            text = "GAME OVER"
+            x = (SCREEN_WIDTH - len(text) * 6) // 2
+            thumby.display.drawText(text, x, 8, 1)
+            
+            score_text = f"SCORE: {self.state.score}"
+            x = (SCREEN_WIDTH - len(score_text) * 6) // 2
+            thumby.display.drawText(score_text, x, 20, 1)
+            
+            hi_text = f"HIGH: {self.state.high_score}"
+            x = (SCREEN_WIDTH - len(hi_text) * 6) // 2
+            thumby.display.drawText(hi_text, x, 28, 1)
+            
+            # Draw return instruction
+            thumby.display.drawText("B:MENU", 2, SCREEN_HEIGHT - 8, 1)
+            
+            thumby.display.update()
+            
+            if thumby.buttonB.justPressed():
+                return
 
     def update_player_position(self):
         speed_multiplier = 1.5 if (self.state.current_powerup and 
