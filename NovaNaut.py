@@ -2,7 +2,6 @@ import thumby
 import math
 import random
 import time
-import json
 from micropython import const
 
 # === CONSTANTS ===
@@ -151,7 +150,6 @@ class GameState:
         self.wave_enemies = 0
         self.wave_announcement_timer = 0
         self.floating_texts = []
-        # Machine gun attributes
         self.heat_level = 0
         self.overheated = False
         self.machine_gun_timer = 0
@@ -209,22 +207,18 @@ class NovaNaut:
         gauge_y = 10
         filled_height = int((self.state.heat_level / MACHINE_GUN_HEAT_MAX) * gauge_height)
         
-        # Draw gauge outline
         thumby.display.drawRectangle(2, gauge_y, 3, gauge_height, 1)
         
-        # Draw fill level
         if filled_height > 0:
             thumby.display.drawFilledRectangle(2, gauge_y + (gauge_height - filled_height), 
                                              3, filled_height, 1)
         
-        # Draw warning indicator when close to overheating
         if self.state.heat_level > MACHINE_GUN_HEAT_MAX * 0.8:
-            if (time.ticks_ms() // 100) % 2:  # Flashing effect
+            if (time.ticks_ms() // 100) % 2:
                 thumby.display.drawText("!", 1, gauge_y + gauge_height + 2, 1)
 
-        # Show "HOT" text when overheated
         if self.state.overheated:
-            if (time.ticks_ms() // 200) % 2:  # Flashing effect
+            if (time.ticks_ms() // 200) % 2:
                 thumby.display.drawText("HOT", 6, gauge_y + 8, 1)
 
     def handle_input(self):
@@ -245,13 +239,12 @@ class NovaNaut:
         else:
             self.player_velocity['x'] *= 0.9
             
-        # Handle shooting
         if thumby.buttonA.pressed():
             self.state.charge = min(self.state.charge + 1, MAX_CHARGE)
         elif self.state.charge > 0:
             self.fire_bullet(charged=True)
             self.state.charge = 0
-        elif thumby.buttonB.pressed() and not self.state.overheated:  # Machine gun
+        elif thumby.buttonB.pressed() and not self.state.overheated:
             if self.state.machine_gun_timer <= 0:
                 if self.state.heat_level < MACHINE_GUN_HEAT_MAX:
                     self.fire_bullet()
@@ -260,9 +253,8 @@ class NovaNaut:
                     
                     if self.state.heat_level >= MACHINE_GUN_HEAT_MAX:
                         self.state.overheated = True
-                        thumby.audio.play(100, 100)  # Overheat sound
+                        thumby.audio.play(100, 100)
         
-        # Update machine gun timer
         if self.state.machine_gun_timer > 0:
             self.state.machine_gun_timer -= 1
 
@@ -315,7 +307,326 @@ class NovaNaut:
         self.aliens.remove(alien)
         self.state.shake_frames = 5
         thumby.audio.play(200, 100)
+
+    def update_player_position(self):
+        speed_multiplier = 1.5 if (self.state.current_powerup and 
+                                 self.state.current_powerup.type == 'SPEED') else 1.0
         
+        self.player.x += self.player_velocity['x'] * speed_multiplier
+        self.player.y += self.player_velocity['y'] * speed_multiplier
+        
+        self.player.x = max(0, min(SCREEN_WIDTH - 13, self.player.x))
+        self.player.y = max(0, min(SCREEN_HEIGHT - 11, self.player.y))
+
+    def update_stars(self):
+        for layer in self.stars:
+            for star in layer:
+                star['x'] -= star['speed']
+                if star['x'] < 0:
+                    star['x'] = SCREEN_WIDTH
+                    star['y'] = random.randint(0, SCREEN_HEIGHT)
+
+    def update_aliens(self):
+        if len(self.aliens) < self.max_aliens and self.state.wave_enemies > 0 and random.random() < 0.02:
+            alien_type = random.choice(['basic', 'scout', 'elite']) if random.random() > 0.8 else 'basic'
+            self.aliens.append({
+                'sprite': thumby.Sprite(8, 8, alienMaps[alien_type]),
+                'type': alien_type,
+                'health': 2 if alien_type == 'elite' else 1,
+                'x': SCREEN_WIDTH,
+                'y': random.randint(0, SCREEN_HEIGHT - 8)
+            })
+            self.state.wave_enemies -= 1
+        
+        for alien in self.aliens[:]:
+            speed = 1.5 if alien['type'] == 'scout' else 1
+            alien['x'] -= speed
+            if alien['x'] < -8:
+                self.aliens.remove(alien)
+
+    def update_bullets(self):
+        for bullet in self.bullets[:]:
+            bullet['x'] += bullet['dx']
+            bullet['y'] += bullet['dy']
+            if bullet['x'] > SCREEN_WIDTH:
+                self.bullets.remove(bullet)
+
+    def check_collisions(self):
+        for alien in self.aliens[:]:
+            for bullet in self.bullets[:]:
+                if (abs(alien['x'] - bullet['x']) < 8 and 
+                    abs(alien['y'] - bullet['y']) < 8):
+                    alien['health'] -= bullet['power']
+                    self.bullets.remove(bullet)
+                    if alien['health'] <= 0:
+                        self.handle_alien_destroyed(alien)
+                        break
+            
+            if (abs(self.player.x + 6 - (alien['x'] + 4)) < 8 and 
+                abs(self.player.y + 5 - (alien['y'] + 4)) < 8):
+                if self.state.shield_active:
+                    self.state.shield_power -= 25
+                    if self.state.shield_power <= 0:
+                        self.state.shield_active = False
+                    self.aliens.remove(alien)
+                else:
+                    self.handle_player_hit()
+                    self.aliens.remove(alien)
+
+    def update(self):
+        self.update_player_position()
+        self.update_bullets()
+        self.update_aliens()
+        self.particles.update()
+        self.update_stars()
+        self.check_collisions()
+        self.state.update_combo()
+        self.update_powerups()
+        self.update_floating_texts()
+        self.update_heat()
+        
+        if self.state.shake_frames > 0:
+            self.state.shake_frames -= 1
+        if self.state.flash_frames > 0:
+            self.state.flash_frames -= 1
+        if self.state.wave_announcement_timer > 0:
+            self.state.wave_announcement_timer -= 1
+
+    def draw_powerups(self):
+        for powerup in self.powerups:
+            if powerup.type == 'SPEED':
+                thumby.display.drawFilledRectangle(int(powerup.x), int(powerup.y), 6, 6, 1)
+                thumby.display.drawLine(int(powerup.x) + 1, int(powerup.y) + 3,
+                                     int(powerup.x) + 4, int(powerup.y) + 3, 0)
+            elif powerup.type == 'SHIELD':
+                # Draw shield powerup using rectangles and lines
+                thumby.display.drawRectangle(int(powerup.x), int(powerup.y), 6, 6, 1)
+                thumby.display.drawLine(int(powerup.x), int(powerup.y) + 3,
+                                     int(powerup.x) + 5, int(powerup.y) + 3, 1)
+                thumby.display.drawLine(int(powerup.x) + 3, int(powerup.y),
+                                     int(powerup.x) + 3, int(powerup.y) + 5, 1)
+            elif powerup.type == 'MULTI':
+                thumby.display.drawFilledRectangle(int(powerup.x), int(powerup.y), 6, 6, 1)
+                thumby.display.drawText("2", int(powerup.x) + 1, int(powerup.y) + 1, 0)
+
+    def draw_powerup_indicator(self):
+        if self.state.current_powerup:
+            icon_x = 2
+            icon_y = 12
+            if self.state.current_powerup.type == 'SPEED':
+                thumby.display.drawLine(icon_x, icon_y + 3, icon_x + 5, icon_y + 3, 1)
+                thumby.display.drawLine(icon_x + 3, icon_y + 1, icon_x + 5, icon_y + 3, 1)
+                thumby.display.drawLine(icon_x + 3, icon_y + 5, icon_x + 5, icon_y + 3, 1)
+            elif self.state.current_powerup.type == 'SHIELD':
+                thumby.display.drawRectangle(icon_x + 1, icon_y + 1, 4, 4, 1)
+            elif self.state.current_powerup.type == 'MULTI':
+                thumby.display.drawText("×2", icon_x, icon_y, 1)
+            
+            bar_width = int((self.state.current_powerup.timer / POWERUP_DURATION) * 10)
+            thumby.display.drawRectangle(icon_x, icon_y + 6, 10, 2, 1)
+            thumby.display.drawFilledRectangle(icon_x, icon_y + 6, bar_width, 2, 1)
+
+    def draw_shield(self):
+        if self.state.shield_active:
+            t = time.ticks_ms() / 200
+            radius = 8
+            segments = 8
+            center_x = self.player.x + 6
+            center_y = self.player.y + 5
+            
+            for i in range(segments):
+                angle = (i / segments) * 2 * math.pi
+                next_angle = ((i + 1) / segments) * 2 * math.pi
+                
+                x1 = int(center_x + math.cos(angle + t) * radius)
+                y1 = int(center_y + math.sin(angle + t) * radius)
+                x2 = int(center_x + math.cos(next_angle + t) * radius)
+                y2 = int(center_y + math.sin(next_angle + t) * radius)
+                
+                if (0 <= x1 < SCREEN_WIDTH and 0 <= y1 < SCREEN_HEIGHT and
+                    0 <= x2 < SCREEN_WIDTH and 0 <= y2 < SCREEN_HEIGHT):
+                    thumby.display.drawLine(x1, y1, x2, y2, 1)
+
+    def draw_combo_indicator(self):
+        if self.state.combo > 1:
+            text = f"{self.state.combo}x"
+            x = SCREEN_WIDTH - len(text) * 6 - 2
+            y = 10
+            thumby.display.drawText(text, x, y, 1)
+            
+            bar_width = int((self.state.combo_timer / COMBO_TIMEOUT) * 10)
+            thumby.display.drawRectangle(x, y + 8, 10, 2, 1)
+            thumby.display.drawFilledRectangle(x, y + 8, bar_width, 2, 1)
+
+    def draw_wave_announcement(self):
+        if self.state.wave_announcement_timer > 0:
+            text = f"WAVE {self.state.wave_number}"
+            x = (SCREEN_WIDTH - len(text) * 6) // 2
+            y = (SCREEN_HEIGHT - 8) // 2
+            thumby.display.drawText(text, x, y, 1)
+
+    def draw_floating_texts(self):
+        for text in self.floating_texts:
+            x = int(text['x'])
+            y = int(text['y'])
+            thumby.display.drawText(text['text'], x, y, 1)
+
+    def draw_stars(self):
+        shake_x = random.randint(-SHAKE_INTENSITY, SHAKE_INTENSITY) if self.state.shake_frames > 0 else 0
+        shake_y = random.randint(-SHAKE_INTENSITY, SHAKE_INTENSITY) if self.state.shake_frames > 0 else 0
+        
+        for layer in self.stars:
+            for star in layer:
+                x = int(star['x']) + shake_x
+                y = int(star['y']) + shake_y
+                if 0 <= x < SCREEN_WIDTH and 0 <= y < SCREEN_HEIGHT:
+                    thumby.display.setPixel(x, y, 1)
+
+    def draw_hud(self):
+        score_text = str(self.state.score)
+        thumby.display.drawText(score_text, 0, 0, 1)
+        
+        for i in range(self.state.lives):
+            thumby.display.drawFilledRectangle(SCREEN_WIDTH - 4 - (i * 5), 0, 3, 3, 1)
+        
+        if self.state.shield_active:
+            shield_width = (self.state.shield_power * 10) // 100
+            thumby.display.drawRectangle(0, SCREEN_HEIGHT - 4, 10, 3, 1)
+            thumby.display.drawFilledRectangle(0, SCREEN_HEIGHT - 4, shield_width, 3, 1)
+        
+        level_text = f"L{self.state.level}"
+        thumby.display.drawText(level_text, SCREEN_WIDTH - 12, SCREEN_HEIGHT - 8, 1)
+        
+        credit_text = f"C:{self.state.credits}"
+        thumby.display.drawText(credit_text, 0, SCREEN_HEIGHT - 8, 1)
+
+    def draw_flash_effect(self):
+        if self.state.flash_frames > 0:
+            alpha = self.state.flash_frames / FLASH_INTERVAL
+            for i in range(0, SCREEN_WIDTH * SCREEN_HEIGHT // 16):
+                if random.random() < alpha:
+                    x = random.randint(0, SCREEN_WIDTH - 1)
+                    y = random.randint(0, SCREEN_HEIGHT - 1)
+                    thumby.display.setPixel(x, y, 1)
+
+    def draw(self):
+        thumby.display.fill(0)
+        
+        shake_x = random.randint(-SHAKE_INTENSITY, SHAKE_INTENSITY) if self.state.shake_frames > 0 else 0
+        shake_y = random.randint(-SHAKE_INTENSITY, SHAKE_INTENSITY) if self.state.shake_frames > 0 else 0
+        
+        # Draw background elements
+        self.draw_stars()
+        self.particles.draw()
+        
+        # Draw game elements with screen shake
+        for bullet in self.bullets:
+            x = int(bullet['x']) + shake_x
+            y = int(bullet['y']) + shake_y
+            thumby.display.drawFilledRectangle(x, y, 3, 2, 1)
+        
+        for alien in self.aliens:
+            alien['sprite'].x = int(alien['x']) + shake_x
+            alien['sprite'].y = int(alien['y']) + shake_y
+            thumby.display.drawSprite(alien['sprite'])
+        
+        self.player.x += shake_x
+        self.player.y += shake_y
+        thumby.display.drawSprite(self.player)
+        self.player.x -= shake_x
+        self.player.y -= shake_y
+        
+        # Draw effects and UI
+        self.draw_shield()
+        
+        if self.state.charge > 0:
+            charge_width = (self.state.charge * 20) // MAX_CHARGE
+            thumby.display.drawRectangle(26, 36, 20, 3, 1)
+            thumby.display.drawFilledRectangle(26, 36, charge_width, 3, 1)
+        
+        self.draw_powerups()
+        self.draw_powerup_indicator()
+        self.draw_combo_indicator()
+        self.draw_wave_announcement()
+        self.draw_floating_texts()
+        self.draw_hud()
+        self.draw_heat_gauge()
+        
+        if self.state.flash_frames > 0:
+            self.draw_flash_effect()
+        
+        thumby.display.update()
+
+    def fire_bullet(self, charged=False):
+        power = 1 + (self.state.upgrades['power'] * 0.5)
+        is_multi = (self.state.current_powerup and 
+                   self.state.current_powerup.type == 'MULTI')
+        
+        if charged:
+            power *= 2
+            if self.state.charge >= MAX_CHARGE or is_multi:
+                angles = [-15, 0, 15]
+                for angle in angles:
+                    self.bullets.append({
+                        'x': self.player.x + 11,
+                        'y': self.player.y + 5,
+                        'dx': math.cos(math.radians(angle)) * 3,
+                        'dy': math.sin(math.radians(angle)),
+                        'power': power
+                    })
+            else:
+                self.bullets.append({
+                    'x': self.player.x + 11,
+                    'y': self.player.y + 5,
+                    'dx': 3,
+                    'dy': 0,
+                    'power': power
+                })
+        else:
+            if is_multi:
+                self.bullets.append({
+                    'x': self.player.x + 11,
+                    'y': self.player.y + 3,
+                    'dx': 2,
+                    'dy': 0,
+                    'power': power
+                })
+                self.bullets.append({
+                    'x': self.player.x + 11,
+                    'y': self.player.y + 7,
+                    'dx': 2,
+                    'dy': 0,
+                    'power': power
+                })
+            else:
+                self.bullets.append({
+                    'x': self.player.x + 11,
+                    'y': self.player.y + 5,
+                    'dx': 2,
+                    'dy': 0,
+                    'power': power
+                })
+        
+        thumby.audio.play(1000 if charged else 800, 50)
+
+    def start_new_wave(self):
+        self.state.wave_number += 1
+        self.state.wave_announcement_timer = 60
+        self.state.wave_enemies = self.state.wave_number * 5
+        self.max_aliens = min(5 + self.state.wave_number, 8)
+
+    def check_wave_completion(self):
+        if self.state.wave_enemies <= 0 and len(self.aliens) == 0:
+            self.start_new_wave()
+
+    def game_loop(self):
+        self.start_new_wave()  # Initialize first wave
+        while self.state.lives > 0:
+            self.handle_input()
+            self.update()
+            self.check_wave_completion()
+            self.draw()
+
     def show_menu(self):
         menu_items = ["START", "UPGRADE", "SCORES"]
         selected = 0
@@ -323,14 +634,12 @@ class NovaNaut:
         while True:
             thumby.display.fill(0)
             
-            # Draw title
             title = "NOVANAUT"
             title_x = (SCREEN_WIDTH - len(title) * 6) // 2
             self.title_flash_timer = (self.title_flash_timer + 1) % 30
             if self.title_flash_timer < 20:
                 thumby.display.drawText(title, title_x, 4, 1)
             
-            # Draw menu items
             for i, item in enumerate(menu_items):
                 y = 15 + i * 8
                 x = (SCREEN_WIDTH - len(item) * 6) // 2
@@ -340,7 +649,6 @@ class NovaNaut:
             
             thumby.display.update()
             
-            # Handle input
             if thumby.buttonU.justPressed() and selected > 0:
                 selected -= 1
                 thumby.audio.play(800, 50)
@@ -448,131 +756,6 @@ class NovaNaut:
             
             if thumby.buttonB.justPressed():
                 return
-
-    def update_player_position(self):
-        speed_multiplier = 1.5 if (self.state.current_powerup and 
-                                 self.state.current_powerup.type == 'SPEED') else 1.0
-        
-        self.player.x += self.player_velocity['x'] * speed_multiplier
-        self.player.y += self.player_velocity['y'] * speed_multiplier
-        
-        self.player.x = max(0, min(SCREEN_WIDTH - 13, self.player.x))
-        self.player.y = max(0, min(SCREEN_HEIGHT - 11, self.player.y))
-
-    def update_stars(self):
-        for layer in self.stars:
-            for star in layer:
-                star['x'] -= star['speed']
-                if star['x'] < 0:
-                    star['x'] = SCREEN_WIDTH
-                    star['y'] = random.randint(0, SCREEN_HEIGHT)
-
-    def update_aliens(self):
-        if len(self.aliens) < self.max_aliens and self.state.wave_enemies > 0 and random.random() < 0.02:
-            alien_type = random.choice(['basic', 'scout', 'elite']) if random.random() > 0.8 else 'basic'
-            self.aliens.append({
-                'sprite': thumby.Sprite(8, 8, alienMaps[alien_type]),
-                'type': alien_type,
-                'health': 2 if alien_type == 'elite' else 1,
-                'x': SCREEN_WIDTH,
-                'y': random.randint(0, SCREEN_HEIGHT - 8)
-            })
-            self.state.wave_enemies -= 1
-        
-        for alien in self.aliens[:]:
-            speed = 1.5 if alien['type'] == 'scout' else 1
-            alien['x'] -= speed
-            if alien['x'] < -8:
-                self.aliens.remove(alien)
-
-    def update_bullets(self):
-        for bullet in self.bullets[:]:
-            bullet['x'] += bullet['dx']
-            bullet['y'] += bullet['dy']
-            if bullet['x'] > SCREEN_WIDTH:
-                self.bullets.remove(bullet)
-
-    def check_collisions(self):
-        for alien in self.aliens[:]:
-            for bullet in self.bullets[:]:
-                if (abs(alien['x'] - bullet['x']) < 8 and 
-                    abs(alien['y'] - bullet['y']) < 8):
-                    alien['health'] -= bullet['power']
-                    self.bullets.remove(bullet)
-                    if alien['health'] <= 0:
-                        self.handle_alien_destroyed(alien)
-                        break
-            
-            if (abs(self.player.x + 6 - (alien['x'] + 4)) < 8 and 
-                abs(self.player.y + 5 - (alien['y'] + 4)) < 8):
-                if self.state.shield_active:
-                    self.state.shield_power -= 25
-                    if self.state.shield_power <= 0:
-                        self.state.shield_active = False
-                    self.aliens.remove(alien)
-                else:
-                    self.handle_player_hit()
-                    self.aliens.remove(alien)
-
-    def fire_bullet(self, charged=False):
-        power = 1 + (self.state.upgrades['power'] * 0.5)
-        is_multi = (self.state.current_powerup and 
-                   self.state.current_powerup.type == 'MULTI')
-        
-        if charged:
-            power *= 2
-            if self.state.charge >= MAX_CHARGE or is_multi:
-                angles = [-15, 0, 15]
-                for angle in angles:
-                    self.bullets.append({
-                        'x': self.player.x + 11,
-                        'y': self.player.y + 5,
-                        'dx': math.cos(math.radians(angle)) * 3,
-                        'dy': math.sin(math.radians(angle)),
-                        'power': power
-                    })
-            else:
-                self.bullets.append({
-                    'x': self.player.x + 11,
-                    'y': self.player.y + 5,
-                    'dx': 3,
-                    'dy': 0,
-                    'power': power
-                })
-        else:
-            if is_multi:
-                self.bullets.append({
-                    'x': self.player.x + 11,
-                    'y': self.player.y + 3,
-                    'dx': 2,
-                    'dy': 0,
-                    'power': power
-                })
-                self.bullets.append({
-                    'x': self.player.x + 11,
-                    'y': self.player.y + 7,
-                    'dx': 2,
-                    'dy': 0,
-                    'power': power
-                })
-            else:
-                self.bullets.append({
-                    'x': self.player.x + 11,
-                    'y': self.player.y + 5,
-                    'dx': 2,
-                    'dy': 0,
-                    'power': power
-                })
-        
-        thumby.audio.play(1000 if charged else 800, 50)
-
-    def game_loop(self):
-        self.start_new_wave()  # Initialize first wave
-        while self.state.lives > 0:
-            self.handle_input()
-            self.update()
-            self.check_wave_completion()
-            self.draw()
 
     def run(self):
         while True:
